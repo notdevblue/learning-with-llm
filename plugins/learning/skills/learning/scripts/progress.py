@@ -66,6 +66,7 @@ def blank(topic, goal):
     return {
         "topic": topic,
         "goal": goal,
+        "baseline": None,
         "current": "",
         "milestones": [],
         "pending": None,
@@ -81,6 +82,12 @@ def render(slug, data):
         f"topic: {data['topic']}",
         f"goal: {data['goal']}",
     ]
+    baseline = data.get("baseline")
+    if baseline:
+        lines.append(f"baseline: {baseline['shown']}")
+        lines.append(f"baseline gap: {baseline['gap']}")
+    elif not data["milestones"]:
+        lines.append("baseline: 없음")
     if current:
         lines.extend(
             [
@@ -190,6 +197,8 @@ def cmd_milestone(root, slug, name, artifact, criterion):
         die(f"같은 이름의 마일스톤이 있다: {name}")
     if active(data):
         die("진행 중인 마일스톤이 있다.")
+    if not data["milestones"] and not data.get("baseline"):
+        die("첫 마일스톤 전에 배경을 남긴다.")
     data["milestones"].append(
         {
             "name": name,
@@ -216,8 +225,19 @@ def cmd_ask(root, slug, kind, question):
     path, data = open_record(root, slug)
     if data.get("pending"):
         die("이미 답이 없는 질문이 있다.")
-    if kind not in ("mid", "milestone"):
-        die("kind는 mid 또는 milestone 이다.")
+    if kind not in ("mid", "milestone", "prior"):
+        die("kind는 mid, milestone, prior 이다.")
+    if kind == "prior":
+        if data["milestones"] or data.get("baseline"):
+            die("배경은 첫 마일스톤 전에, 한 번만 묻는다.")
+        question = question.strip()
+        if not question:
+            die("질문이 비어 있다.")
+        data["pending"] = {"kind": "prior", "question": question, "milestone": ""}
+        data["next"] = ""
+        save(path, data)
+        show(slug, data)
+        return
     item = current_of(data)
     if item["status"] != "진행 중":
         die("질문은 진행 중인 마일스톤에만 낸다.")
@@ -238,10 +258,28 @@ def cmd_grade(root, slug, shown, gap):
     pending = data.get("pending")
     if not pending:
         die("채점할 질문이 없다.")
+    shown, gap = shown.strip(), gap.strip()
+    if pending["kind"] == "prior":
+        if not shown or not gap:
+            die("배경은 아는 것과 멈추는 곳이 모두 필요하다. 답은 적지 않는다.")
+        data["baseline"] = {"shown": shown, "gap": gap}
+        data["checks"].append(
+            {
+                "date": date.today().isoformat(),
+                "kind": "prior",
+                "question": pending["question"],
+                "shown": shown,
+                "gap": gap,
+                "change": "",
+            }
+        )
+        data["pending"] = None
+        save(path, data)
+        show(slug, data)
+        return
     item = milestone(data, pending["milestone"])
     if not item:
         die("질문의 마일스톤이 없다.")
-    shown, gap = shown.strip(), gap.strip()
     if not shown and not gap:
         die("사용자가 보인 것 또는 빈틈을 적는다. 답은 적지 않는다.")
     item["understanding"] = {"shown": shown, "gap": gap}
@@ -327,6 +365,21 @@ def cmd_revise(root, slug, name, artifact, criterion, reason):
     show(slug, data)
 
 
+def cmd_baseline(root, slug, shown, gap):
+    slug = resolve_slug(root, slug)
+    path, data = open_record(root, slug)
+    if data.get("pending"):
+        die("답이 없는 질문이 있다.")
+    if data["milestones"] or data.get("baseline"):
+        die("배경은 첫 마일스톤 전에, 한 번만 남긴다.")
+    shown, gap = shown.strip(), gap.strip()
+    if not shown or not gap:
+        die("배경은 아는 것과 멈추는 곳이 모두 필요하다. 답은 적지 않는다.")
+    data["baseline"] = {"shown": shown, "gap": gap}
+    save(path, data)
+    show(slug, data)
+
+
 def cmd_next(root, slug, text):
     slug = resolve_slug(root, slug)
     path, data = open_record(root, slug)
@@ -358,7 +411,7 @@ def build_parser():
 
     ask = sub.add_parser("ask", help="질문을 남긴다")
     ask.add_argument("--slug")
-    ask.add_argument("--kind", required=True, choices=("mid", "milestone"))
+    ask.add_argument("--kind", required=True, choices=("mid", "milestone", "prior"))
     ask.add_argument("--question", required=True)
 
     grade = sub.add_parser("grade", help="보인 이해와 빈틈을 남긴다")
@@ -375,6 +428,11 @@ def build_parser():
     revise.add_argument("--artifact", required=True)
     revise.add_argument("--criterion", required=True)
     revise.add_argument("--reason", required=True)
+
+    base = sub.add_parser("baseline", help="첫 마일스톤 전에 아는 범위와 멈추는 곳을 남긴다")
+    base.add_argument("--slug")
+    base.add_argument("--shown", required=True)
+    base.add_argument("--gap", required=True)
 
     nxt = sub.add_parser("next", help="다음에 할 일을 적는다")
     nxt.add_argument("--slug")
@@ -405,6 +463,8 @@ def dispatch(args):
         cmd_pass(root, args.slug)
     elif args.cmd == "revise":
         cmd_revise(root, args.slug, args.name, args.artifact, args.criterion, args.reason)
+    elif args.cmd == "baseline":
+        cmd_baseline(root, args.slug, args.shown, args.gap)
     elif args.cmd == "next":
         cmd_next(root, args.slug, args.text)
 
@@ -433,7 +493,43 @@ def self_test():
             assert err.code == 1
         else:
             raise AssertionError("duplicate start")
+        try:
+            cmd_milestone(root, "scheduler", "전환", "전환 추적", "왜 전환하는지 말한다")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("milestone before baseline")
+        cmd_ask(root, "scheduler", "prior", "이미 설명할 수 있는 것이 어디까지인가?")
+        try:
+            cmd_grade(root, "scheduler", "상태만 말했다", "")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("prior grade without the stop")
+        data = load(record_path(root, "scheduler"))
+        assert data["pending"]["kind"] == "prior"
+        assert data["baseline"] is None
+        cmd_grade(root, "scheduler", "상태를 말한다", "고르는 순서는 모른다")
+        data = load(record_path(root, "scheduler"))
+        assert data["baseline"] == {"shown": "상태를 말한다", "gap": "고르는 순서는 모른다"}
+        assert data["pending"] is None
+        assert "answer" not in keys_of(data)
+        text = render("scheduler", data)
+        assert "baseline: 상태를 말한다" in text
+        assert "baseline gap: 고르는 순서는 모른다" in text
+        try:
+            cmd_ask(root, "scheduler", "prior", "다시")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("second prior")
         cmd_milestone(root, "scheduler", "전환", "전환 추적", "왜 전환하는지 말한다")
+        try:
+            cmd_ask(root, "scheduler", "prior", "다시")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("prior after milestone")
         try:
             cmd_milestone(root, "scheduler", "다른 것", "결과", "기준")
         except SystemExit:
@@ -462,6 +558,9 @@ def self_test():
         assert milestone(data, "조건")["status"] == "통과"
         assert data["current"] == ""
         cmd_start(root, "다른 주제", "다른 결과", "other")
+        cmd_baseline(root, "other", "없음", "용어부터")
+        data = load(record_path(root, "other"))
+        assert data["baseline"] == {"shown": "없음", "gap": "용어부터"}
         try:
             cmd_status(root, None)
         except SystemExit as err:
