@@ -1,0 +1,27 @@
+{
+  "name": "learning-with-llm",
+  "description": "직접 공부할 때 쓰는 선생님 플러그인.",
+  "owner": {
+    "name": "notdevblue",
+    "url": "https://github.com/notdevblue"
+  },
+  "plugins": [
+    {
+      "name": "learning",
+      "description": "공부할 때 선생님으로 행동한다. 설명, 마일스톤, 중간 질문을 하고 결과물은 사용자가 만든다.",
+      "author": {
+        "name": "notdevblue",
+        "url": "https://github.com/notdevblue"
+      },
+      "source": "./plugins/learning",
+      "homepage": "https://github.com/notdevblue/learning-with-llm",
+      "repository": "https://github.com/notdevblue/learning-with-llm",
+      "keywords": ["learning", "study", "teaching"],
+      "category": "Education",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      }
+    }
+  ]
+}
