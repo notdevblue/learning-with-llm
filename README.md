@@ -52,7 +52,7 @@ codex plugin marketplace add notdevblue/learning-with-llm
 
 스킬 이름은 `learning`이다. Grok에서는 `/learning`, Claude Code에서는 `/learning:learning`, Codex에서는 `$learning`이다. 공부, 이어서, 이해했는지처럼 스킬 설명에 있는 말로 시작해도 된다.
 
-진행과 확인은 스킬 폴더의 `scripts/progress.py`가 공부하는 프로젝트의 `study/<slug>/progress.json`에 남긴다. 답은 저장하지 않는다. 이 기록은 플러그인이나 스킬을 복사할 때 같이 넣지 않는다.
+진행과 확인은 스킬 폴더의 `scripts/progress.py`가 공부하는 프로젝트의 `study/<slug>/progress.json`에 남긴다. 파일을 만드는 것은 사용자가 연 요청부터다. 답은 저장하지 않는다. 이 기록은 플러그인이나 스킬을 복사할 때 같이 넣지 않는다.
 
 ## 사용
 
@@ -62,7 +62,7 @@ codex plugin marketplace add notdevblue/learning-with-llm
 /learning 프로세스 스케줄러를 이해하고 싶다. 아주 작은 스케줄러를 내가 짜는 게 목표다.
 ```
 
-에이전트는 먼저 이미 설명하거나 할 수 있는 것이 어디까지인지, 어디서 멈추는지를 묻는다. 그다음 첫 마일스톤과 읽을 곳을 정한다. 원리를 설명한 뒤 질문을 하나 던지고, 답을 받기 전에는 다음으로 넘어가지 않는다.
+에이전트는 사용자가 연 말로 기록 파일을 먼저 만든다. 주제와 결과물이 보이면 남기고, 이어서 이미 설명하거나 할 수 있는 것이 어디까지인지, 어디서 멈추는지를 묻는다. 그다음 첫 마일스톤과 읽을 곳을 정한다. 원리를 설명한 뒤 질문을 하나 던지고, 답을 받기 전에는 다음으로 넘어가지 않는다.
 
 ```text
 준비 상태가 아닌 작업이 있으면 스케줄러는 어떻게 고르나?

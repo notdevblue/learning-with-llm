@@ -62,10 +62,11 @@ def slugify(text):
     return re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
 
 
-def blank(topic, goal):
+def blank(request):
     return {
-        "topic": topic,
-        "goal": goal,
+        "request": request,
+        "topic": "",
+        "goal": "",
         "baseline": None,
         "current": "",
         "milestones": [],
@@ -77,11 +78,17 @@ def blank(topic, goal):
 
 def render(slug, data):
     current = milestone(data, data.get("current"))
-    lines = [
-        f"slug: {slug}",
-        f"topic: {data['topic']}",
-        f"goal: {data['goal']}",
-    ]
+    lines = [f"slug: {slug}"]
+    if "request" in data:
+        lines.append("request: |")
+        for line in data["request"].splitlines() or [""]:
+            lines.append(f"  {line}")
+    lines.extend(
+        [
+            f"topic: {data.get('topic') or '없음'}",
+            f"goal: {data.get('goal') or '없음'}",
+        ]
+    )
     baseline = data.get("baseline")
     if baseline:
         lines.append(f"baseline: {baseline['shown']}")
@@ -134,7 +141,12 @@ def resolve_slug(root, slug):
     open_items = []
     for name, data in found:
         current = milestone(data, data.get("current"))
-        if data.get("pending") or (current and current["status"] != "통과"):
+        if (
+            data.get("pending")
+            or not data.get("topic")
+            or not data.get("goal")
+            or (current and current["status"] != "통과")
+        ):
             open_items.append(name)
     if len(open_items) == 1:
         return open_items[0]
@@ -162,7 +174,8 @@ def cmd_list(root):
         current = milestone(data, data.get("current"))
         status = current["status"] if current else "없음"
         label = current["name"] if current else "없음"
-        print(f"{slug}\t{status}\t{label}\t{data['topic']}")
+        title = " ".join((data.get("topic") or data.get("request") or "").split())
+        print(f"{slug}\t{status}\t{label}\t{title}")
 
 
 def cmd_status(root, slug):
@@ -171,16 +184,37 @@ def cmd_status(root, slug):
     show(slug, data)
 
 
-def cmd_start(root, topic, goal, slug):
-    slug = slug or slugify(topic)
+def cmd_start(root, request, slug):
+    request = request.strip()
+    if not request:
+        die("요청이 필요하다.")
+    slug = slug or slugify(request)
     if not slug or not SLUG.fullmatch(slug):
         die("영문 slug가 필요하다. --slug 로 준다.")
     path = record_path(root, slug)
     if path.exists():
         die(f"이미 있다: {slug}")
-    data = blank(topic.strip(), goal.strip())
-    if not data["topic"] or not data["goal"]:
+    save(path, blank(request))
+    show(slug, load(path))
+
+
+def require_aim(data):
+    if not data.get("topic") or not data.get("goal"):
+        die("주제와 목표 결과물을 먼저 남긴다.")
+
+
+def cmd_aim(root, slug, topic, goal):
+    slug = resolve_slug(root, slug)
+    path, data = open_record(root, slug)
+    if data.get("pending"):
+        die("답이 없는 질문이 있다.")
+    if data["milestones"] or data.get("baseline"):
+        die("주제와 결과물은 배경을 남기기 전에만 정한다.")
+    topic, goal = topic.strip(), goal.strip()
+    if not topic or not goal:
         die("주제와 목표 결과물이 필요하다.")
+    data["topic"] = topic
+    data["goal"] = goal
     save(path, data)
     show(slug, data)
 
@@ -190,6 +224,7 @@ def cmd_milestone(root, slug, name, artifact, criterion):
     path, data = open_record(root, slug)
     if data.get("pending"):
         die("답이 없는 질문이 있다.")
+    require_aim(data)
     name, artifact, criterion = name.strip(), artifact.strip(), criterion.strip()
     if not name or not artifact or not criterion:
         die("이름, 결과물, 기준이 필요하다.")
@@ -225,6 +260,7 @@ def cmd_ask(root, slug, kind, question):
     path, data = open_record(root, slug)
     if data.get("pending"):
         die("이미 답이 없는 질문이 있다.")
+    require_aim(data)
     if kind not in ("mid", "milestone", "prior"):
         die("kind는 mid, milestone, prior 이다.")
     if kind == "prior":
@@ -370,6 +406,7 @@ def cmd_baseline(root, slug, shown, gap):
     path, data = open_record(root, slug)
     if data.get("pending"):
         die("답이 없는 질문이 있다.")
+    require_aim(data)
     if data["milestones"] or data.get("baseline"):
         die("배경은 첫 마일스톤 전에, 한 번만 남긴다.")
     shown, gap = shown.strip(), gap.strip()
@@ -385,6 +422,7 @@ def cmd_next(root, slug, text):
     path, data = open_record(root, slug)
     if data.get("pending"):
         die("답이 없는 질문이 있다. 다음 행동을 넘기지 않는다.")
+    require_aim(data)
     text = text.strip()
     if not text:
         die("다음 행동이 비어 있다.")
@@ -398,10 +436,14 @@ def build_parser():
     parser.add_argument("--root", default=".", help="study/ 를 만들 작업 디렉터리")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    start = sub.add_parser("start", help="주제를 만든다")
-    start.add_argument("--topic", required=True)
-    start.add_argument("--goal", required=True)
+    start = sub.add_parser("start", help="사용자가 연 요청으로 기록을 만든다")
+    start.add_argument("--request", required=True)
     start.add_argument("--slug")
+
+    aim = sub.add_parser("aim", help="주제와 목표 결과물을 남긴다")
+    aim.add_argument("--slug")
+    aim.add_argument("--topic", required=True)
+    aim.add_argument("--goal", required=True)
 
     mile = sub.add_parser("milestone", help="마일스톤을 추가하고 현재로 둔다")
     mile.add_argument("--slug")
@@ -452,7 +494,9 @@ def dispatch(args):
     elif args.cmd == "status":
         cmd_status(root, args.slug)
     elif args.cmd == "start":
-        cmd_start(root, args.topic, args.goal, args.slug)
+        cmd_start(root, args.request, args.slug)
+    elif args.cmd == "aim":
+        cmd_aim(root, args.slug, args.topic, args.goal)
     elif args.cmd == "milestone":
         cmd_milestone(root, args.slug, args.name, args.artifact, args.criterion)
     elif args.cmd == "ask":
@@ -486,13 +530,43 @@ def self_test():
     with redirect_stdout(sink), redirect_stderr(sink), tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         script = Path(__file__).resolve()
-        cmd_start(root, "스케줄러", "작은 스케줄러", "scheduler")
+        cmd_start(root, "스케줄러를 이해하고 작은 스케줄러를 짜고 싶다", "scheduler")
         try:
-            cmd_start(root, "스케줄러", "작은 스케줄러", "scheduler")
+            cmd_start(root, "  ", "empty")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("empty request")
+        try:
+            cmd_start(root, "스케줄러를 이해하고 작은 스케줄러를 짜고 싶다", "scheduler")
         except SystemExit as err:
             assert err.code == 1
         else:
             raise AssertionError("duplicate start")
+        data = load(record_path(root, "scheduler"))
+        assert data["request"] == "스케줄러를 이해하고 작은 스케줄러를 짜고 싶다"
+        assert data["topic"] == ""
+        assert data["goal"] == ""
+        text = render("scheduler", data)
+        assert "request: |" in text
+        assert "  스케줄러를 이해하고 작은 스케줄러를 짜고 싶다" in text
+        assert "goal: 없음" in text
+        try:
+            cmd_milestone(root, "scheduler", "전환", "전환 추적", "왜 전환하는지 말한다")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("milestone before aim")
+        try:
+            cmd_baseline(root, "scheduler", "상태를 말한다", "순서는 모른다")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("baseline before aim")
+        cmd_aim(root, "scheduler", "스케줄러", "작은 스케줄러")
+        data = load(record_path(root, "scheduler"))
+        assert data["topic"] == "스케줄러"
+        assert data["goal"] == "작은 스케줄러"
         try:
             cmd_milestone(root, "scheduler", "전환", "전환 추적", "왜 전환하는지 말한다")
         except SystemExit:
@@ -524,6 +598,12 @@ def self_test():
         else:
             raise AssertionError("second prior")
         cmd_milestone(root, "scheduler", "전환", "전환 추적", "왜 전환하는지 말한다")
+        try:
+            cmd_aim(root, "scheduler", "다른", "다른 결과")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("aim after milestone")
         try:
             cmd_ask(root, "scheduler", "prior", "다시")
         except SystemExit:
@@ -557,7 +637,8 @@ def self_test():
         data = load(record_path(root, "scheduler"))
         assert milestone(data, "조건")["status"] == "통과"
         assert data["current"] == ""
-        cmd_start(root, "다른 주제", "다른 결과", "other")
+        cmd_start(root, "다른 주제를 보고 다른 결과를 만든다", "other")
+        cmd_aim(root, "other", "다른 주제", "다른 결과")
         cmd_baseline(root, "other", "없음", "용어부터")
         data = load(record_path(root, "other"))
         assert data["baseline"] == {"shown": "없음", "gap": "용어부터"}
